@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LiDAR 航带对齐试验台</title>
+<style>
+  :root {
+    --bg:#0f141a; --panel:#171e26; --ink:#e6edf3; --muted:#93a1b0;
+    --line:#2a3644; --accent:#4db6ff; --warn:#ffb454; --bad:#ff6b6b; --ok:#5dd39e;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+         background:var(--bg); color:var(--ink); }
+  header { padding:10px 16px; border-bottom:1px solid var(--line); display:flex;
+           gap:14px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:15px; margin:0; font-weight:600; }
+  button, select, input { font:inherit; }
+  button { background:#22303e; color:var(--ink); border:1px solid var(--line);
+           border-radius:6px; padding:5px 10px; cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button.primary { background:var(--accent); color:#08131e; border-color:var(--accent); font-weight:600; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  select, input[type=text], input[type=number] { background:#0e141a; color:var(--ink);
+           border:1px solid var(--line); border-radius:6px; padding:4px 7px; }
+  .wrap { display:grid; grid-template-columns:300px 1fr; gap:0; min-height:calc(100vh - 49px); }
+  .side { border-right:1px solid var(--line); padding:12px; background:var(--panel);
+           overflow:auto; max-height:calc(100vh - 49px); }
+  .main { padding:12px 16px; overflow:auto; max-height:calc(100vh - 49px); }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted);
+       margin:16px 0 6px; }
+  h2:first-child { margin-top:0; }
+  .row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin:5px 0; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px;
+          padding:9px 11px; margin:7px 0; }
+  .card.active { border-color:var(--accent); }
+  .card .name { font-weight:600; }
+  .meta { color:var(--muted); font-size:11px; }
+  .tag { font-size:10px; padding:1px 6px; border-radius:10px; border:1px solid var(--line);
+         color:var(--muted); }
+  .tag.ok { color:var(--ok); border-color:var(--ok); }
+  .tag.bad { color:var(--bad); border-color:var(--bad); }
+  .tag.pub { color:var(--warn); border-color:var(--warn); }
+  canvas { background:#0c1117; border:1px solid var(--line); border-radius:8px;
+           display:block; margin:8px 0; }
+  .grid3 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .compare { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  label.chk { display:flex; gap:6px; align-items:center; font-size:12px; margin:2px 0; }
+  .error { background:#2a1719; border:1px solid var(--bad); color:#ffc9c9; border-radius:8px;
+           padding:9px 12px; margin:8px 0; white-space:pre-wrap; }
+  .candidates { background:#25230f; border:1px solid var(--warn); color:#ffe6ad;
+           border-radius:8px; padding:9px 12px; margin:8px 0; font-size:12px; }
+  .small { font-size:11px; color:var(--muted); }
+  table { border-collapse:collapse; width:100%; font-size:11px; }
+  td, th { border-bottom:1px solid var(--line); padding:3px 6px; text-align:left; }
+  th { color:var(--muted); font-weight:500; }
+  .scroll { max-height:220px; overflow:auto; }
+  code { background:#0e141a; padding:1px 4px; border-radius:4px; }
+  .legend { display:flex; gap:12px; flex-wrap:wrap; font-size:11px; color:var(--muted); }
+  .legend i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px;
+              vertical-align:middle; }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>LiDAR 航带对齐试验台</h1>
+  <button id="btn-demo">载入演示数据</button>
+  <span id="dataset-info" class="meta"></span>
+  <span style="flex:1"></span>
+  <a class="btn" href="/docs" target="_blank"><button>API 文档</button></a>
+  <button id="btn-audit">审计日志</button>
+</header>
+
+<div class="wrap">
+  <div class="side">
+    <h2>数据集</h2>
+    <div id="dataset-panel" class="small">尚未载入。点击右上角“载入演示数据”。</div>
+
+    <h2>方案</h2>
+    <div class="row">
+      <select id="new-model">
+        <option value="rigid6-v1">刚体 rigid6-v1（全局 6 自由度）</option>
+        <option value="strip_offset3-v1">每带偏移 strip_offset3-v1</option>
+        <option value="strip_drift-v1">缓变漂移 strip_drift-v1</option>
+      </select>
+    </div>
+    <div class="row">
+      <input id="new-name" type="text" placeholder="方案名称" style="width:150px">
+      <button class="primary" id="btn-new-plan">新建方案</button>
+    </div>
+    <div id="plan-list"></div>
+
+    <div id="plan-controls" class="hidden">
+      <h2>约束操作（派生新方案）</h2>
+      <div class="card" id="gcp-list-card">
+        <div class="name">控制点</div>
+        <div id="gcp-list"></div>
+      </div>
+      <div class="card">
+        <div class="name">航带对应组</div>
+        <div id="corr-groups"></div>
+      </div>
+      <div class="card">
+        <div class="name">个别对应</div>
+        <div id="corr-list" class="scroll"></div>
+      </div>
+      <div class="card">
+        <div class="name">分段（仅漂移模型）</div>
+        <div id="split-controls"></div>
+      </div>
+      <div class="card">
+        <div class="name">求解参数</div>
+        <div class="row">
+          <span class="small">剔除阈值 σ (m)</span>
+          <input id="sigma" type="number" step="0.05" min="0" style="width:80px">
+        </div>
+        <label class="chk"><input type="checkbox" id="reject"> 自动剔除超限对应</label>
+        <div class="row" style="margin-top:6px">
+          <input id="fork-name" type="text" placeholder="派生方案名称" style="width:150px">
+          <button id="btn-fork">应用并派生</button>
+        </div>
+      </div>
+      <div class="row">
+        <button class="primary" id="btn-run">求解</button>
+        <button id="btn-publish">发布</button>
+        <button id="btn-compare">加入比较</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div id="status-banner"></div>
+    <div id="results">
+      <div class="small">在左侧选择或新建方案，然后点击“求解”。</div>
+    </div>
+    <div id="views"></div>
+    <h2>方案并排比较</h2>
+    <div id="compare-panel" class="small">用每个方案卡片的“加入比较”选择两个方案。</div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

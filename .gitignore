@@ -34,3 +34,11 @@ coverage/
 .vite/
 .turbo/
 *.tsbuildinfo
+
+# local SQLite databases (runtime data, never committed)
+*.db
+*.db-wal
+*.db-shm
+
+# UI verification tooling (not required to run)
+node_modules/
